@@ -157,10 +157,11 @@ app.post("/chat", async (req, res) => {
     const textoIA = iaRes.data.content[0].text;
     let resposta;
     try {
-      resposta = JSON.parse(textoIA);
-    } catch {
-      return res.json({ mensagem: textoIA, acao: "resposta" });
-    }
+  const limpo = textoIA.replace(/```json|```/g, "").trim();
+  resposta = JSON.parse(limpo);
+} catch {
+  return res.json({ mensagem: textoIA, acao: "resposta" });
+}
 
     // ✅ CORREÇÃO: se ação exige Meta Ads mas usuário não está logado, avisa
     const acoesQuePrecisamDeLogin = ["criar_campanha", "criar_conjunto", "criar_anuncio", "listar_campanhas", "pausar_campanha"];
