@@ -5,12 +5,25 @@ const session = require("express-session");
 require("dotenv").config();
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json());
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(session({
   secret: process.env.SESSION_SECRET || "segredo-trocar",
   resave: false,
   saveUninitialized: false,
+  proxy: true,
+  cookie: {
+    secure: true,
+    sameSite: "none",
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000
+  }
 }));
 
 const META_APP_ID = process.env.META_APP_ID;
@@ -20,18 +33,15 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 // ─── 1. LOGIN COM META ───────────────────────────────────────────────────────
 
-// Redireciona o usuário para a tela de login do Facebook
 app.get("/auth/meta", (req, res) => {
   const scopes = "ads_management,ads_read,business_management";
   const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${REDIRECT_URI}&scope=${scopes}&response_type=code`;
   res.redirect(url);
 });
 
-// Facebook redireciona de volta aqui com um "code"
 app.get("/auth/meta/callback", async (req, res) => {
   const { code } = req.query;
   try {
-    // Troca o code por um token de acesso
     const tokenRes = await axios.get("https://graph.facebook.com/v19.0/oauth/access_token", {
       params: {
         client_id: META_APP_ID,
@@ -42,7 +52,6 @@ app.get("/auth/meta/callback", async (req, res) => {
     });
     req.session.accessToken = tokenRes.data.access_token;
 
-    // Busca as contas de anúncio do usuário
     const adAccountsRes = await axios.get("https://graph.facebook.com/v19.0/me/adaccounts", {
       params: {
         access_token: req.session.accessToken,
@@ -51,14 +60,16 @@ app.get("/auth/meta/callback", async (req, res) => {
     });
     req.session.adAccounts = adAccountsRes.data.data;
 
-    res.redirect(`${process.env.FRONTEND_URL}?logado=true`);
+    req.session.save((err) => {
+      if (err) console.error("Erro ao salvar sessão:", err);
+      res.redirect(`${process.env.FRONTEND_URL}?logado=true`);
+    });
   } catch (err) {
     console.error("Erro no login:", err.response?.data || err.message);
     res.redirect(`${process.env.FRONTEND_URL}?erro=login`);
   }
 });
 
-// Retorna dados da sessão atual
 app.get("/auth/status", (req, res) => {
   if (req.session.accessToken) {
     res.json({ logado: true, contas: req.session.adAccounts });
@@ -67,7 +78,6 @@ app.get("/auth/status", (req, res) => {
   }
 });
 
-// Logout
 app.post("/auth/logout", (req, res) => {
   req.session.destroy();
   res.json({ ok: true });
@@ -125,7 +135,6 @@ app.post("/chat", async (req, res) => {
   req.session.contaId = contaId || req.session.contaId;
 
   try {
-    // Chama a IA para interpretar o pedido do usuário
     const iaRes = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
@@ -151,12 +160,10 @@ app.post("/chat", async (req, res) => {
       return res.json({ mensagem: textoIA, acao: "resposta" });
     }
 
-    // Se a IA apenas respondeu sem criar nada, retorna direto
     if (resposta.acao === "resposta") {
       return res.json(resposta);
     }
 
-    // Executa a ação no Meta Ads
     const resultado = await executarAcaoMeta(
       resposta.acao,
       resposta.parametros,
@@ -189,7 +196,6 @@ async function executarAcaoMeta(acao, params, token, contaId) {
     }
 
     case "criar_conjunto": {
-      // Busca IDs dos interesses no Meta
       let targeting = {
         geo_locations: { countries: [params.pais || "BR"] },
         age_min: params.idade_min || 18,
@@ -220,7 +226,6 @@ async function executarAcaoMeta(acao, params, token, contaId) {
     }
 
     case "criar_anuncio": {
-      // Primeiro cria o criativo
       const criativoRes = await axios.post(`${base}/act_${contaId}/adcreatives`, {
         name: `${params.nome} - Criativo`,
         object_story_spec: {
@@ -235,7 +240,6 @@ async function executarAcaoMeta(acao, params, token, contaId) {
         access_token: token,
       });
 
-      // Depois cria o anúncio usando o criativo
       const anuncioRes = await axios.post(`${base}/act_${contaId}/ads`, {
         name: params.nome,
         adset_id: params.conjunto_id,
