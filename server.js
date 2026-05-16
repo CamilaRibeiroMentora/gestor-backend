@@ -126,13 +126,15 @@ Parâmetros para pausar_campanha: { campanha_id: string }
 
 Sempre responda em JSON válido, sem texto fora do JSON.`;
 
+// ✅ CORREÇÃO: removido o bloqueio por accessToken — chat funciona sem login
 app.post("/chat", async (req, res) => {
-  if (!req.session.accessToken) {
-    return res.status(401).json({ erro: "Não autenticado" });
+  const { mensagens, contaId } = req.body;
+
+  if (contaId) {
+    req.session.contaId = contaId;
   }
 
-  const { mensagens, contaId } = req.body;
-  req.session.contaId = contaId || req.session.contaId;
+  const estaLogado = !!req.session.accessToken;
 
   try {
     const iaRes = await axios.post(
@@ -158,6 +160,17 @@ app.post("/chat", async (req, res) => {
       resposta = JSON.parse(textoIA);
     } catch {
       return res.json({ mensagem: textoIA, acao: "resposta" });
+    }
+
+    // ✅ CORREÇÃO: se ação exige Meta Ads mas usuário não está logado, avisa
+    const acoesQuePrecisamDeLogin = ["criar_campanha", "criar_conjunto", "criar_anuncio", "listar_campanhas", "pausar_campanha"];
+
+    if (acoesQuePrecisamDeLogin.includes(resposta.acao) && !estaLogado) {
+      return res.json({
+        acao: "resposta",
+        parametros: {},
+        mensagem: `Entendi! ${resposta.mensagem}\n\nPara executar essa ação no Meta Ads, você precisa primeiro conectar sua conta do Facebook. Clique no botão **"Conectar com Facebook"** no topo da página e depois repita o pedido. 🚀`,
+      });
     }
 
     if (resposta.acao === "resposta") {
