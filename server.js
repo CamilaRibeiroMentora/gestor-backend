@@ -45,7 +45,7 @@ if (!ANTHROPIC_API_KEY) {
 
 // ─── 1. LOGIN COM META ────────────────────────────────────────────────────────
 app.get("/auth/meta", (req, res) => {
-  const scopes = "ads_management,ads_read,business_management,pages_read_engagement,pages_manage_ads";
+  const scopes = "ads_management,ads_read,business_management";
   const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${REDIRECT_URI}&scope=${scopes}&response_type=code`;
   res.redirect(url);
 });
