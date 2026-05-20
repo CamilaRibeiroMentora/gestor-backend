@@ -204,11 +204,13 @@ Parâmetros para analisar_resultados: { periodo: "last_7d" | "last_30d" | "last_
 Para "resposta": { "acao": "resposta", "parametros": {}, "mensagem": "sua resposta" }
 
 IMPORTANTE:
+- SEMPRE que o usuário pedir para "criar campanha completa" ou mencionar campanha + conjunto + anúncio juntos, use OBRIGATORIAMENTE a ação "criar_campanha_completa"
+- NUNCA use "criar_campanha" isolado quando o usuário pedir campanha completa
 - Sempre use a conta e página padrão a menos que o usuário especifique outra
 - Sempre crie campanhas com status PAUSED para revisão
 - Quando o usuário enviar link do Google Drive ou Instagram, use como url_midia
-- Para campanhas completas, use sempre criar_campanha_completa para criar tudo de uma vez
-- Sempre responda em JSON válido, sem texto fora do JSON`;
+- Sempre responda em JSON válido, sem texto fora do JSON
+- Para campanhas completas, o JSON deve ter EXATAMENTE esta estrutura: {"acao":"criar_campanha_completa","parametros":{"campanha":{...},"conjunto":{...},"anuncio":{...}},"mensagem":"..."}
 
 // ─── 4. CHAT COM IA ───────────────────────────────────────────────────────────
 app.post("/chat", async (req, res) => {
