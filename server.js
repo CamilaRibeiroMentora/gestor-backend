@@ -29,7 +29,17 @@ app.use(session({
 const META_APP_ID = process.env.META_APP_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
+
+// ─── VALIDAÇÃO DA API KEY NO STARTUP ────────────────────────────────────────
+
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+if (!ANTHROPIC_API_KEY) {
+  console.error("🚨 ERRO CRÍTICO: ANTHROPIC_API_KEY não encontrada nas variáveis de ambiente!");
+  console.error("Configure a variável ANTHROPIC_API_KEY no Railway e faça redeploy.");
+} else {
+  console.log("✅ ANTHROPIC_API_KEY carregada:", ANTHROPIC_API_KEY.substring(0, 20) + "...");
+}
 
 // ─── 1. LOGIN COM META ───────────────────────────────────────────────────────
 
@@ -126,7 +136,6 @@ Parâmetros para pausar_campanha: { campanha_id: string }
 
 Sempre responda em JSON válido, sem texto fora do JSON.`;
 
-// ✅ CORREÇÃO: removido o bloqueio por accessToken — chat funciona sem login
 app.post("/chat", async (req, res) => {
   const { mensagens, contaId } = req.body;
 
@@ -136,7 +145,21 @@ app.post("/chat", async (req, res) => {
 
   const estaLogado = !!req.session.accessToken;
 
+  // ─── VALIDAÇÃO DA API KEY A CADA CHAMADA ────────────────────────────────
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || apiKey.trim() === "") {
+    console.error("🚨 /chat: ANTHROPIC_API_KEY está vazia ou ausente!");
+    return res.status(500).json({
+      erro: "API key da IA não configurada no servidor.",
+      detalhe: "Configure ANTHROPIC_API_KEY no Railway e faça redeploy."
+    });
+  }
+
+  console.log(`📨 /chat chamado | logado: ${estaLogado} | mensagens: ${mensagens?.length}`);
+
   try {
+    console.log("🤖 Chamando Anthropic API...");
+
     const iaRes = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
@@ -147,23 +170,29 @@ app.post("/chat", async (req, res) => {
       },
       {
         headers: {
-          "x-api-key": ANTHROPIC_API_KEY,
+          "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
         },
       }
     );
 
+    console.log("✅ Resposta da Anthropic recebida");
+
     const textoIA = iaRes.data.content[0].text;
+    console.log("📝 Texto bruto da IA:", textoIA.substring(0, 200));
+
     let resposta;
     try {
-  const limpo = textoIA.replace(/```json|```/g, "").trim();
-  resposta = JSON.parse(limpo);
-} catch {
-  return res.json({ mensagem: textoIA, acao: "resposta" });
-}
+      const limpo = textoIA.replace(/```json|```/g, "").trim();
+      resposta = JSON.parse(limpo);
+      console.log("✅ JSON parseado com sucesso, ação:", resposta.acao);
+    } catch (parseErr) {
+      console.warn("⚠️ Resposta não era JSON, retornando texto direto:", parseErr.message);
+      return res.json({ mensagem: textoIA, acao: "resposta" });
+    }
 
-    // ✅ CORREÇÃO: se ação exige Meta Ads mas usuário não está logado, avisa
+    // Se ação exige Meta Ads mas usuário não está logado, avisa
     const acoesQuePrecisamDeLogin = ["criar_campanha", "criar_conjunto", "criar_anuncio", "listar_campanhas", "pausar_campanha"];
 
     if (acoesQuePrecisamDeLogin.includes(resposta.acao) && !estaLogado) {
@@ -178,6 +207,7 @@ app.post("/chat", async (req, res) => {
       return res.json(resposta);
     }
 
+    console.log(`⚙️ Executando ação Meta: ${resposta.acao}`);
     const resultado = await executarAcaoMeta(
       resposta.acao,
       resposta.parametros,
@@ -186,9 +216,24 @@ app.post("/chat", async (req, res) => {
     );
 
     res.json({ ...resposta, resultado });
+
   } catch (err) {
-    console.error("Erro no chat:", err.response?.data || err.message);
-    res.status(500).json({ erro: "Erro interno", detalhe: err.message });
+    const erroDetalhado = err.response?.data || err.message;
+    console.error("🚨 Erro no /chat:", JSON.stringify(erroDetalhado, null, 2));
+
+    // Mensagens de erro específicas para facilitar o diagnóstico
+    if (err.response?.status === 401) {
+      console.error("🔑 Erro 401: API key inválida ou sem permissão.");
+    } else if (err.response?.status === 404) {
+      console.error("❌ Erro 404: Modelo não encontrado. Verifique o nome do modelo.");
+    } else if (err.response?.status === 429) {
+      console.error("⏳ Erro 429: Rate limit atingido. Aguarde e tente novamente.");
+    }
+
+    res.status(500).json({
+      erro: "Erro ao chamar a IA",
+      detalhe: erroDetalhado
+    });
   }
 });
 
@@ -327,4 +372,9 @@ app.get("/metricas/:contaId", async (req, res) => {
 // ─── INICIAR SERVIDOR ────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`✅ Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Servidor rodando na porta ${PORT}`);
+  console.log(`🌐 FRONTEND_URL: ${process.env.FRONTEND_URL}`);
+  console.log(`🔑 ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY ? "✅ configurada" : "🚨 AUSENTE"}`);
+  console.log(`📘 META_APP_ID: ${META_APP_ID ? "✅ configurado" : "⚠️ ausente"}`);
+});
